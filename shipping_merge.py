@@ -72,6 +72,25 @@ def stack_pages(goods_page, express_page):
     return merged
 
 
+def label_page(source):
+    """Fit content proportionally on a separate 100 x 100 mm page."""
+    page = copy.deepcopy(source)
+    if page.rotation:
+        page.transfer_rotation_to_content()
+    size = 100 * 72 / 25.4
+    width, height = float(page.cropbox.width), float(page.cropbox.height)
+    if width <= 0 or height <= 0:
+        raise ValueError('PDF 页面尺寸无效')
+    scale = min(size / width, size / height)
+    x, y = (size - width * scale) / 2, (size - height * scale) / 2
+    page.add_transformation(Transformation().translate(-float(page.cropbox.left), -float(page.cropbox.bottom)).scale(scale).translate(x, y))
+    for box in ('mediabox', 'cropbox', 'trimbox', 'bleedbox', 'artbox'):
+        setattr(page, box, RectangleObject((x, y, x + width * scale, y + height * scale)))
+    output = PageObject.create_blank_page(width=size, height=size)
+    output.merge_page(page)
+    return output
+
+
 def merge_documents(goods_paths, express_paths, output_dir=None):
     if not goods_paths or not express_paths:
         raise ValueError('请选择货物单和快递单文件')
@@ -94,6 +113,7 @@ def merge_documents(goods_paths, express_paths, output_dir=None):
     output = Path(output_dir) if output_dir else Path(tempfile.mkdtemp(prefix='快递单合并结果_', dir=Path(goods_paths[0]).resolve().parent))
     output.mkdir(parents=True, exist_ok=True)
     pdf_paths = []
+    filename_map = {}
     used = set()
     matched = 0
     for record in goods:
@@ -109,22 +129,25 @@ def merge_documents(goods_paths, express_paths, output_dir=None):
             continue
         position = candidates[0]
         writer = PdfWriter()
-        writer.add_page(stack_pages(record['page'], express[position]['page']))
-        pdf_path = output / record['filename']
-        counter = 2
+        writer.add_page(label_page(record['page']))
+        writer.add_page(label_page(express[position]['page']))
+        stem = re.sub(r'-修改后的\(\d+\)$', '', Path(record['filename']).stem)
+        pdf_path = output / f'{stem}.pdf'
+        counter = 1
         while pdf_path.exists():
-            pdf_path = output / f"{Path(record['filename']).stem}_{counter}.pdf"
+            pdf_path = output / f'{stem}（{counter}）.pdf'
             counter += 1
         with pdf_path.open('wb') as stream:
             writer.write(stream)
         pdf_paths.append(str(pdf_path))
+        filename_map[record['filename']] = pdf_path.name
         used.add(position)
         matched += 1
         notes.append(f"已合并：{record['label']} + {express[position]['label']} [{number}] → {pdf_path.name}")
     skipped = len(goods) - matched
-    summary = f'货物单 {len(goods)} 页，快递单 {len(express)} 页\n已生成 {matched} 个独立PDF，跳过货物单 {skipped} 页，未使用快递单 {len(express) - len(used)} 页\n每份分页货物单下方拼接对应快递单，保留分页文件名。\n输出目录：{output}'
+    summary = f'货物单 {len(goods)} 页，快递单 {len(express)} 页\n已生成 {matched} 个独立PDF，跳过货物单 {skipped} 页，未使用快递单 {len(express) - len(used)} 页\n每份PDF两页：第一页货物单，第二页快递单，每页100×100毫米。\n输出目录：{output}'
     if not matched:
         summary += '\n没有唯一匹配的页面，未生成合并PDF。'
     (output / '匹配报告.txt').write_text(summary + '\n\n' + '\n'.join(notes), encoding='utf-8-sig')
     return {'matched': matched, 'skipped': skipped, 'summary': summary,
-            'output_dir': str(output), 'pdf_paths': pdf_paths}
+            'output_dir': str(output), 'pdf_paths': pdf_paths, 'filename_map': filename_map}

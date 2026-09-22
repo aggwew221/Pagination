@@ -59,9 +59,10 @@ class ShippingTests(unittest.TestCase):
         writer.write(str(e))
         result = merge_documents([str(g)], [str(e)])
         self.assertEqual((result['matched'], result['skipped']), (2, 0))
-        pages = [PdfReader(path).pages[0] for path in result['pdf_paths']]
-        for page, number, other in zip(pages, ['JT0025632933491', 'JT0025636114030'], ['JT0025636114030', 'JT0025632933491']):
-            text = page.extract_text()
+        pairs = [PdfReader(path).pages for path in result['pdf_paths']]
+        for pages, number, other in zip(pairs, ['JT0025632933491', 'JT0025636114030'], ['JT0025636114030', 'JT0025632933491']):
+            self.assertEqual(len(pages), 2)
+            text = ''.join(page.extract_text() for page in pages)
             self.assertGreaterEqual(text.count(number), 2)
             self.assertNotIn(other, text)
 
@@ -75,15 +76,13 @@ class ShippingTests(unittest.TestCase):
         self.assertEqual(len(result['pdf_paths']), 2)
         for path in result['pdf_paths']:
             reader = PdfReader(path)
-            self.assertEqual(len(reader.pages), 1)
-            page = reader.pages[0]
-            self.assertEqual((float(page.mediabox.width), float(page.mediabox.height)), (300, 250))
-            positions = {}
-            def visitor(text, cm, tm, font, size):
-                if 'GOODS' in text or 'EXPRESS' in text:
-                    positions['goods' if 'GOODS' in text else 'express'] = tm[5] + cm[5]
-            page.extract_text(visitor_text=visitor)
-            self.assertGreater(positions['goods'], positions['express'])
+            self.assertEqual(len(reader.pages), 2)
+            self.assertIn('GOODS', reader.pages[0].extract_text())
+            self.assertNotIn('EXPRESS', reader.pages[0].extract_text())
+            self.assertIn('EXPRESS', reader.pages[1].extract_text())
+            for page in reader.pages:
+                self.assertAlmostEqual(float(page.mediabox.width) * 25.4 / 72, 100, places=4)
+                self.assertAlmostEqual(float(page.mediabox.height) * 25.4 / 72, 100, places=4)
         second = merge_documents([str(goods)], [str(express)])
         self.assertNotEqual(result['output_dir'], second['output_dir'])
 
@@ -107,7 +106,7 @@ class ShippingTests(unittest.TestCase):
         self.assertEqual(len(result['pdf_paths']), 1)
         output = Path(result['pdf_paths'][0])
         self.assertEqual(output.name, goods.name)
-        self.assertEqual(len(PdfReader(output).pages), 1)
+        self.assertEqual(len(PdfReader(output).pages), 2)
         self.assertEqual(goods.read_bytes(), original)
 
     def test_rotation_crop_and_source_unchanged(self):
@@ -123,8 +122,19 @@ class ShippingTests(unittest.TestCase):
         self.assertIn('GOODS', page.extract_text())
         self.assertIn('EXPRESS', page.extract_text())
 
+    def test_output_name_collisions(self):
+        goods, express = self.base / '123-商品-3个.pdf', self.base / 'express.pdf'
+        fixture(goods, ['GOODS Tracking: SF123456'])
+        fixture(express, ['EXPRESS SF123456'])
+        output = self.base / 'results'
+        expected = ['123-商品-3个.pdf', '123-商品-3个（1）.pdf', '123-商品-3个（2）.pdf']
+        for name in expected:
+            result = merge_documents([str(goods)], [str(express)], output_dir=output)
+            self.assertEqual(Path(result['pdf_paths'][0]).name, name)
+        self.assertEqual(sorted(p.name for p in output.glob('*.pdf')), sorted(expected))
+
     def test_ui_wiring(self):
-        spec = importlib.util.spec_from_file_location('pagination', Path(__file__).with_name('Pagination1.6.3.py'))
+        spec = importlib.util.spec_from_file_location('pagination', Path(__file__).with_name('Pagination1.7.py'))
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         with patch.object(module.tk, 'Tk'), patch.object(module.tk, 'StringVar'), patch.object(module.tk, 'Text'), patch.object(module, 'ttk') as widgets:
@@ -150,7 +160,7 @@ class ShippingTests(unittest.TestCase):
         import os
         import pandas as pd
         from generation import generate_folder
-        spec = importlib.util.spec_from_file_location('pagination_pipeline', Path(__file__).with_name('Pagination1.6.3.py'))
+        spec = importlib.util.spec_from_file_location('pagination_pipeline', Path(__file__).with_name('Pagination1.7.py'))
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         goods, express = self.base / 'goods.pdf', self.base / 'express.pdf'
@@ -182,12 +192,12 @@ class ShippingTests(unittest.TestCase):
                 second = Path(app.last_generated_folder)
                 self.assertNotEqual(first, second)
                 self.assertTrue((second / 'NEW1001-商品-1个.pdf').exists())
-                self.assertTrue((second / 'NEW1001-商品-1个_2.pdf').exists())
+                self.assertTrue((second / 'NEW1001-商品-1个（1）.pdf').exists())
                 self.assertTrue((second / 'SKU相关文件/NEW1001-reference.pdf').exists())
                 for path in second.glob('*.pdf'):
                     pages = PdfReader(path).pages
-                    self.assertEqual(len(pages), 1)
-                    self.assertIn('EXPRESS', pages[0].extract_text())
+                    self.assertEqual(len(pages), 2)
+                    self.assertIn('EXPRESS', pages[1].extract_text())
                 rows = pd.read_excel(second / '批量_汇总表.xlsx')
                 self.assertEqual(list(rows['合并状态']), ['已合并', '已合并'])
                 # A failed next run must not claim successful generation.

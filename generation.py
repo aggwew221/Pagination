@@ -55,9 +55,9 @@ def generate_folder(processor, progress=lambda text: None):
                 processor.extracted_data.append(info)
                 name = processor.generate_filename(info)
                 target = split_dir / name
-                counter = 2
+                counter = 1
                 while target.exists():
-                    target = split_dir / f'{Path(name).stem}_{counter}.pdf'
+                    target = split_dir / f'{Path(name).stem}（{counter}）.pdf'
                     counter += 1
                 writer = PdfWriter()
                 writer.add_page(page)
@@ -88,14 +88,14 @@ def generate_folder(processor, progress=lambda text: None):
             notes.append(f'SKU相关PDF：已复制 {copied} 份')
         else:
             notes.append('未找到 word 文件夹，已跳过SKU相关PDF复制')
-        progress('4/5 将快递单拼接到每份货物单下方...')
+        progress('4/5 生成100×100毫米双页面单...')
         result = merge_documents(processor.split_file_paths, express_paths, output_dir=output)
         progress('5/5 导出Excel汇总和生成报告...')
-        merged_names = {Path(path).name for path in result['pdf_paths']}
         for row in rows:
-            row['合并状态'] = '已合并' if row['文件名'] in merged_names else '未合并，详见匹配报告'
+            row['成果文件名'] = result['filename_map'].get(row['文件名'], '')
+            row['合并状态'] = '已合并' if row['成果文件名'] else '未合并，详见匹配报告'
         pd.DataFrame(rows).to_excel(output / '批量_汇总表.xlsx', index=False)
-        summary = f"已生成结果文件夹：{output}\n\n合并PDF：{result['matched']} 份（货物单上、快递单下）\n未合并：{result['skipped']} 份，原页保存在“分页原件”\n" + '\n'.join(notes) + '\n已保存Excel汇总表和匹配报告。'
+        summary = f"已生成结果文件夹：{output}\n\n合并PDF：{result['matched']} 份（每份两页：货物单、快递单；每页100×100毫米）\n未合并：{result['skipped']} 份，原页保存在“分页原件”\n" + '\n'.join(notes) + '\n已保存Excel汇总表和匹配报告。'
         (output / '生成说明.txt').write_text(summary, encoding='utf-8-sig')
         processor.current_page = 0
         processor.display_page_info()

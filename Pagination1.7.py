@@ -51,7 +51,7 @@ class PDFProcessor:
         ttk.Button(file_frame, text='选择快递单', command=self.select_express_files).grid(row=4, column=1, padx=(8, 0))
         self.merge_button = ttk.Button(file_frame, text='合并', command=self.merge_shipping_pdfs)
         self.merge_button.grid(row=4, column=2, padx=(8, 0))
-        ttk.Label(file_frame, text='先开始处理完成分页，再合并：每份分页文件下方拼接快递单，逐份输出。').grid(row=5, column=0, columnspan=3, sticky=tk.W, pady=(4, 0))
+        ttk.Label(file_frame, text='每份成果两页：货物单＋快递单，每页100×100毫米；可直接一键生成。').grid(row=5, column=0, columnspan=3, sticky=tk.W, pady=(4, 0))
         edit_frame = ttk.LabelFrame(main_frame, text='信息提取与编辑', padding='8')
         edit_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 8)
             )
@@ -516,7 +516,7 @@ class PDFProcessor:
                         if filename in filename_count:
                             filename_count[filename] += 1
                             name, ext = os.path.splitext(filename)
-                            filename = f'{name}_{filename_count[filename]}{ext}'
+                            filename = f'{name}（{filename_count[filename] - 1}）{ext}'
                         else:
                             filename_count[filename] = 1
                         output_path = os.path.join(output_dir, filename)
